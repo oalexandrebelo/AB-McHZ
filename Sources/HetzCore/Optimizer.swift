@@ -148,3 +148,10 @@ enum ColorProfiles {
         return .success(name)
     }
 }
+
+extension Optimizer {
+    /// Perfil de cor do perfil como padrão da tela (usado pela automação do app, uma vez por conexão).
+    public static func ensureColorProfile(_ name: String, on id: CGDirectDisplayID) -> Result<String, ColorProfileError> {
+        ColorProfiles.ensure(name, on: id)
+    }
+}

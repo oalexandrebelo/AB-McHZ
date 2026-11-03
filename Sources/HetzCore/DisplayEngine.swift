@@ -201,7 +201,9 @@ public actor DisplayEngine {
         guard CGDisplayVendorNumber(id) == 0 else { return .notNeeded }
         let wire = try await edid(for: id, refresh: true)
         guard let fixed = wire.headerRepaired else { return .notRepairable(wire.issues) }
-        try await withRetry(on: id) { bus throws(DDCError) in try bus.setVirtualEDID(fixed.bytes) }
+        // Uma tentativa só: cada SetVirtualEDID retreina o link (a tela pisca); quem insiste é o chamador, com limite.
+        guard let bus = buses[id] else { throw .unavailable(id) }
+        try await onI2CQueue { () throws(DDCError) in try bus.setVirtualEDID(fixed.bytes) }
         let step = Duration.milliseconds(250)
         for _ in 0..<max(1, Int(wait / step)) {
             try? await Task.sleep(for: step)
@@ -294,7 +296,8 @@ public actor DisplayEngine {
         to spec: DisplayModeSpec,
         hiDPI: Bool = false,
         allowUnsafe: Bool = false,
-        watchdog: Duration = .seconds(6)
+        watchdog: Duration = .seconds(6),
+        commit: Bool = true
     ) async throws(ModeError) -> ModeSwitchOutcome {
         // O CoreGraphics trata o ID 0 como "tela principal": só aceita ID que esteja online.
         guard id != kCGNullDirectDisplay, DisplayModes.isOnline(id) else { throw .offline(id) }
@@ -320,9 +323,16 @@ public actor DisplayEngine {
         let observed = CGDisplayCopyDisplayMode(id).map(ModeInfo.init)
         defer { refresh() }
         if DisplayModes.isOnline(id), let observed, observed.sameMode(as: targetInfo) {
+            if commit { _ = DisplayModes.apply(target, to: id, option: .permanently) }
             return .applied(observed)
         }
         let revert = DisplayModes.apply(previous, to: id)
         return .reverted(attempted: targetInfo, observed: observed, restored: previousInfo, revertError: revert.rawValue, droppedOffline: droppedOffline)
+    }
+
+    /// Grava como permanente o modo ativo (depois que o usuário confirmou um modo aplicado com `commit: false`).
+    public nonisolated func commitCurrentMode(_ id: CGDirectDisplayID) {
+        guard let mode = CGDisplayCopyDisplayMode(id) else { return }
+        _ = DisplayModes.apply(mode, to: id, option: .permanently)
     }
 }

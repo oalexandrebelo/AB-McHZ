@@ -89,15 +89,17 @@ Modelo inspirado no mercado (base livre, recursos avançados pagos ou licenciado
 - Limite consciente: a avaliação fica em `UserDefaults` (`org.ab-mchz.shared`) e pode ser reiniciada apagando a preferência. Como o código é aberto, a trava do PRO é contrato de licença, não DRM.
 - Todo recurso PRO novo entra em `ProFeature` e checa `Licensing.current.allows(...)` no app e no CLI.
 
-## 5. Otimização automática por monitor (PRO, implementado)
+## 5. Automação por monitor (PRO, implementado)
 
-`Sources/HetzCore/Optimizer.swift` usa o perfil medido de cada monitor:
+Regras em `Sources/HetzCore/AutoPilot.swift`, aplicadas pelo app:
 - **Taxa:** primeira de `[hz, fallbackHz]` que o link oferece como modo seguro.
   - PG259QN: 360 Hz pela DP 1.4, 240 Hz pela HDMI 2.0.
   - XL2430T: 144 Hz pela DP, 60 Hz pela HDMI.
-
-  Corrige o macOS que acorda em 60 Hz. Nunca tenta modo sem SafeFlag.
-- **Cor:** grava o perfil ICC do perfil (`sRGB IEC61966-2.1`) como padrão da tela no ColorSync, no escopo do usuário.
-- **Preset padrão (DDC):** uma vez por conexão, para não desfazer o slider de brilho a cada minuto.
-- **Escolha manual:** se o usuário escolhe um modo à mão, a taxa daquela tela fica como ele deixou até reconectar.
+  - Preset com `macos.hz` (ULMB) fixa a taxa.
+- **Quando corrige a taxa:** só ao conectar, ao acordar ou quando o preset muda o alvo. No timer, só observa; modo diferente do último aplicado pelo app é escolha do usuário. Modo revertido pelo watchdog não é repetido na mesma conexão.
+- **Permanência:** a troca é `.forSession` durante o watchdog e vira `.permanently` só depois de confirmada.
+- **Cor:** perfil ICC do perfil (`sRGB IEC61966-2.1`) uma vez por conexão.
+- **Presets automáticos:** app em primeiro plano > agenda (`"schedule": "20:00-07:00"`) > padrão. São aplicados na borda: só quando o desejado muda. DDC que falha é tentado até 3 vezes.
+- **Conexão:** chaveada por vendor/modelo/série do macOS; ausência de até 5 min (sleep) não é reconexão.
+- **Segurança DDC:** perfis só gravam códigos de imagem e áudio (`MCCS.safeCodes`). O barramento recusa escrita fora do `0x37`, então nada grava na EEPROM do EDID.
 - **CLI:** `hetzctl optimize <tela> [--dry-run] [--preset]`.

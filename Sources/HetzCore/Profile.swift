@@ -5,11 +5,13 @@ import Foundation
 public enum ProfileError: Error, Equatable, Sendable, CustomStringConvertible {
     case unsupportedSchema(String)
     case unknownPreset(String, available: [String])
+    case multipleDefaults([String])
 
     public var description: String {
         switch self {
         case .unsupportedSchema(let schema): "schema \"\(schema)\" não suportado (esperado \(Profile.schemaID))"
         case .unknownPreset(let name, let available): "preset \"\(name)\" não existe; disponíveis: \(available.joined(separator: ", "))"
+        case .multipleDefaults(let names): "mais de um preset padrão: \(names.joined(separator: ", "))"
         }
     }
 }
@@ -64,9 +66,11 @@ public struct Profile: Decodable, Sendable, Equatable {
         /// `macos` do preset: objeto com "hz" sobrepõe o modo do perfil; texto é só nota.
         public let hzOverride: Int?
         public let macosNote: String?
+        /// "20:00-07:00": a automação PRO usa este preset nesse horário (pode virar a meia-noite).
+        public let schedule: ScheduleWindow?
 
         private enum CodingKeys: String, CodingKey {
-            case isDefault = "default", requires, ddc, macos
+            case isDefault = "default", requires, ddc, macos, schedule
         }
 
         private struct MacOSOverride: Decodable {
@@ -82,9 +86,20 @@ public struct Profile: Decodable, Sendable, Equatable {
                 guard key.lowercased().hasPrefix("0x"), let code = MCCS.parseCode(key), let word = UInt16(exactly: value) else {
                     throw DecodingError.dataCorruptedError(forKey: .ddc, in: container, debugDescription: "par DDC inválido: \(key)=\(value)")
                 }
+                guard MCCS.safeCodes.contains(code) else {
+                    throw DecodingError.dataCorruptedError(forKey: .ddc, in: container, debugDescription: "VCP \(key) não é permitido em perfil")
+                }
                 ddc[code] = word
             }
             self.ddc = ddc
+            if let text = try container.decodeIfPresent(String.self, forKey: .schedule) {
+                guard let window = ScheduleWindow(text) else {
+                    throw DecodingError.dataCorruptedError(forKey: .schedule, in: container, debugDescription: "agenda inválida: \(text) (use HH:MM-HH:MM)")
+                }
+                schedule = window
+            } else {
+                schedule = nil
+            }
             if let note = try? container.decodeIfPresent(String.self, forKey: .macos) {
                 macosNote = note
                 hzOverride = nil
@@ -98,6 +113,8 @@ public struct Profile: Decodable, Sendable, Equatable {
     public static func load(from url: URL) throws -> Profile {
         let profile = try JSONDecoder().decode(Profile.self, from: Data(contentsOf: url))
         guard profile.schema == schemaID else { throw ProfileError.unsupportedSchema(profile.schema) }
+        let defaults = profile.presets.filter(\.value.isDefault).keys.sorted()
+        guard defaults.count <= 1 else { throw ProfileError.multipleDefaults(defaults) }
         return profile
     }
 
@@ -123,7 +140,7 @@ public struct Profile: Decodable, Sendable, Equatable {
     }
 
     public var defaultPresetName: String? {
-        presets.first { $0.value.isDefault }?.key
+        presets.keys.sorted().first { presets[$0]!.isDefault }
     }
 
     public func plan(for presetName: String) throws(ProfileError) -> ApplyPlan {
@@ -139,6 +156,29 @@ public struct Profile: Decodable, Sendable, Equatable {
             ddc: preset.ddc.keys.sorted().map { VCPWrite(code: $0, value: preset.ddc[$0]!) },
             requires: preset.requires
         )
+    }
+}
+
+/// Janela diária em minutos desde a meia-noite; `start > end` atravessa a meia-noite.
+public struct ScheduleWindow: Sendable, Equatable {
+    public let start: Int
+    public let end: Int
+
+    public init?(_ text: String) {
+        let parts = text.split(separator: "-").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let start = Self.minutes(parts[0]), let end = Self.minutes(parts[1]), start != end else { return nil }
+        self.start = start
+        self.end = end
+    }
+
+    public func contains(_ minute: Int) -> Bool {
+        start < end ? (start..<end).contains(minute) : minute >= start || minute < end
+    }
+
+    private static func minutes(_ text: String) -> Int? {
+        let hm = text.split(separator: ":")
+        guard hm.count == 2, let h = Int(hm[0]), let m = Int(hm[1]), (0..<24).contains(h), (0..<60).contains(m) else { return nil }
+        return h * 60 + m
     }
 }
 

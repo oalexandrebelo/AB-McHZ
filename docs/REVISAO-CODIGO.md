@@ -4,7 +4,11 @@ Escopo: `Sources/`, `Tests/`, `scripts/`, README e docs no commit `e1194ed`.
 - `swift build` ok; `swift test` com 58/58.
 - Nenhum caminho grava na EEPROM de EDID (I2C `0x50`): as escritas vão só para `0x37` (DDC). O reparo de EDID usa o DCP (`SetVirtualEDIDMode`).
 
-## Corrigir antes de usar a otimização automática
+## Situação (2026-11-03, commit seguinte a `d5d4244`)
+
+Itens 1 a 8 e 10 a 12 corrigidos. A lógica foi para `HetzCore/AutoPilot.swift`, com testes em `AutoPilotTests.swift`. O item 9 foi corrigido em parte: o relógio só avança e um início no futuro conta como expirado. O PRO segue sem trava técnica, por ser código aberto. Sem `flock` entre app e `hetzctl`: o app recusa rodar em duas cópias, mas o CLI e o app ainda podem coincidir.
+
+## Achados originais
 
 | # | Gravidade | Problema | Onde | Correção |
 |---|---|---|---|---|

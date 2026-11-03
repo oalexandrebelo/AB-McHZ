@@ -89,6 +89,7 @@
     },
     "noite": {
       "slot": "Gamer 2 (S Switch)",
+      "schedule": "20:00-07:00",
       "osd": {
         "Picture Mode": "partir do preset trabalho → salvar em Gamer 2",
         "Brightness": 8,

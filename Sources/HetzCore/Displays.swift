@@ -115,7 +115,8 @@ enum DisplayModes {
 
     /// Modo seguro vai pela API pública. Modo sem SafeFlag ela aceita e ignora em silêncio, então vai
     /// pelo número do modo na lista do SkyLight (o "displayModeNumber" com que o BetterDisplay trocava).
-    static func apply(_ mode: CGDisplayMode, to id: CGDirectDisplayID) -> CGError {
+    /// `.forSession` durante o watchdog: se o app cair no meio, o logout desfaz. Só o modo confirmado vira `.permanently`.
+    static func apply(_ mode: CGDisplayMode, to id: CGDirectDisplayID, option: CGConfigureOption = .forSession) -> CGError {
         let info = ModeInfo(mode)
         let number = info.isSafe ? nil : modeNumber(for: info, on: id)
         var config: CGDisplayConfigRef?
@@ -125,7 +126,7 @@ enum DisplayModes {
         } else {
             CGConfigureDisplayWithDisplayMode(config, id, mode, nil)
         }
-        return CGCompleteDisplayConfiguration(config, .permanently)
+        return CGCompleteDisplayConfiguration(config, option)
     }
 
     /// Layout do registro do SkyLight (displayplacer): +0 número, +8 largura, +12 altura, +190 Hz (UInt16), +0xD0 densidade.

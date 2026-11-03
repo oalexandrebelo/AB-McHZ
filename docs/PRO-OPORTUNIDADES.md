@@ -69,7 +69,17 @@ Mesas consideradas:
 - **Créditos:** `THIRD_PARTY_NOTICES.md` com o aviso de cada fonte MIT/Apache usada.
 - **Assinatura:** Developer ID e notarização (conta Apple Developer) para rodar sem o aviso do Gatekeeper em outros Macs.
 
-## 5. Ordem sugerida
+## 5. Situação
+
+Feitos em 2026-11-03:
+- **1.** preset por app;
+- **2.** agenda (BenQ `noite`, 20:00–07:00);
+- **6.** ULMB com taxa de 240 Hz fixada pelo preset;
+- **7.** atalhos ⌃⌥⌘1–9, pelo Carbon `RegisterEventHotKey`, sem dependência nova nem permissão de Acessibilidade.
+
+Próximos: 4 (proteção de layout), 3 (tela virtual a partir do BetterDummy MIT) e `THIRD_PARTY_NOTICES.md` quando o primeiro código de terceiros entrar.
+
+## 6. Ordem sugerida (original)
 
 1. Itens 1, 2, 6 e 7. Usam só o que já existe e entregam valor imediato nos dois monitores.
 2. Item 4 e `THIRD_PARTY_NOTICES.md`.

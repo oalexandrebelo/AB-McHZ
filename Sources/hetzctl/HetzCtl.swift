@@ -11,7 +11,7 @@ uso: hetzctl <comando>
   edid-fix <tela>                           entrega ao DCP o EDID com o cabeçalho corrigido (volátil)
   edid-clear <tela>                         devolve ao DCP o EDID do próprio monitor
   get <tela> <vcp>                          lê um código VCP (0x10 = brilho)
-  set <tela> <vcp> <valor>                  grava um código VCP e confere a releitura
+  set <tela> <vcp> <valor> [--force]        grava um código VCP e confere a releitura (--force para entrada, energia, reset)
   modes <tela>                              modos que o macOS oferece para a tela
   mode <tela> LxA@Hz [--hidpi] [--force]    troca o modo com watchdog de 6 s
   apply <perfil.json> <preset> [--display <tela>] [--dry-run] [--force]   (PRO)
@@ -189,6 +189,9 @@ struct CLI {
     func set(_ query: String, _ vcp: String, _ text: String) async throws -> Int32 {
         let code = try parseVCP(vcp)
         guard let value = UInt16(text) else { throw UsageError("valor inválido: \(text) (0–65535)") }
+        guard MCCS.safeCodes.contains(code) || flags.contains("--force") else {
+            throw UsageError("VCP \(MCCS.format(code)) pode tirar a imagem ou resetar o monitor (entrada, energia, reset); repita com --force")
+        }
         let display = try await engine.resolve(query)
         let after = try await engine.setVCP(code, to: value, on: display.id)
         print("tela \(display.id) · VCP \(MCCS.format(code)) = \(after.current) (máx \(after.maximum))")

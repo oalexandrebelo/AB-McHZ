@@ -31,6 +31,10 @@ public enum MCCS {
     /// 0xDC…) ele conta opções e pode ser menor que o valor atual (a BenQ responde 0x60 = 18, máx 14).
     public static let continuousCodes: Set<UInt8> = [0x10, 0x12, 0x16, 0x18, 0x1A, 0x62, 0x6C, 0x6E, 0x70, 0x87, 0x8A]
 
+    /// Códigos de imagem e áudio que perfis e automação podem gravar. Fora daqui ficam os que tiram a imagem
+    /// ou mexem no monitor inteiro (0x04/0x05/0x06/0x08 resets, 0x60 entrada, 0xD6 energia): só `hetzctl set --force`.
+    public static let safeCodes: Set<UInt8> = [0x10, 0x12, 0x14, 0x16, 0x18, 0x1A, 0x62, 0x6C, 0x6E, 0x70, 0x87, 0x8D]
+
     public static func checksum(_ bytes: some Sequence<UInt8>, seed: UInt8) -> UInt8 {
         bytes.reduce(seed, ^)
     }

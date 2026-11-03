@@ -50,3 +50,30 @@ import Testing
         #expect(Edition.resolve(key: "ABMCHZ-PRO.x.y", trialStart: start, now: start + 100 * day, publicKey: publicKey) == .free)
     }
 }
+
+@Suite struct LicenseHardeningTests {
+    let signer = Curve25519.Signing.PrivateKey()
+    var publicKey: String { signer.publicKey.rawRepresentation.base64EncodedString() }
+    let day: TimeInterval = 86_400
+    let start = Date(timeIntervalSince1970: 1_793_000_000)
+
+    @Test func acceptsKeyWrappedByAnEmailClient() throws {
+        let key = try LicenseKey.issue(owner: "dono", privateKey: signer)
+        let wrapped = "  " + key.enumerated().map { $0.offset % 60 == 59 ? "\($0.element)\r\n" : "\($0.element)" }.joined() + "\n"
+        #expect(try LicenseKey.parse(wrapped, publicKey: publicKey).owner == "dono")
+    }
+
+    @Test func rollingTheClockBackDoesNotRestoreTrialDays() {
+        let lastSeen = start + 20 * day
+        #expect(Edition.resolve(key: nil, trialStart: start, now: start + 1 * day, lastSeen: lastSeen, publicKey: publicKey) == .free)
+    }
+
+    @Test func trialStartInTheFutureCountsAsExpired() {
+        #expect(Edition.resolve(key: nil, trialStart: start + 30 * day, now: start, publicKey: publicKey) == .free)
+    }
+
+    @Test func embeddedPublicKeyIsAValidEd25519Key() throws {
+        let raw = try #require(Data(base64Encoded: LicenseKey.embeddedPublicKey))
+        _ = try Curve25519.Signing.PublicKey(rawRepresentation: raw)
+    }
+}

@@ -1,5 +1,6 @@
 // AB-McHZ na barra de menus: o título é a taxa de atualização das telas em texto (ex.: "60Hz").
 // O menu tem brilho por DDC, resolução/taxa (com o watchdog do HetzCore) e os presets dos perfis.
+// PRO: automação por monitor (AutoPilot): taxa, perfil de cor e presets por app, por horário ou padrão; atalhos ⌃⌥⌘1–9.
 import AppKit
 import HetzCore
 
@@ -16,18 +17,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingBrightness: [CGDirectDisplayID: UInt16] = [:]
     private var writingBrightness: Set<CGDirectDisplayID> = []
     private var repairedEDID: Set<CGDirectDisplayID> = []
-    private var lastRepairAttempt: [CGDirectDisplayID: ContinuousClock.Instant] = [:]
+    private var pilot = AutoPilot()
+    private var hotKeys: HotKeys?
     private var autoRepairEDID: Bool {
         get { UserDefaults.standard.object(forKey: "autoRepairEDID") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "autoRepairEDID") }
     }
-    /// PRO. Preset padrão só uma vez por conexão (não desfaz o slider de brilho a cada minuto);
-    /// taxa não é corrigida na tela em que o usuário escolheu um modo à mão, até reconectar.
-    private var optimizedConnection: Set<CGDirectDisplayID> = []
-    private var manualMode: Set<CGDirectDisplayID> = []
     private var autoOptimize: Bool {
         get { UserDefaults.standard.object(forKey: "autoOptimize") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "autoOptimize") }
+    }
+    /// id do perfil → bundle id do app → preset.
+    private var appPresets: [String: [String: String]] {
+        get { UserDefaults.standard.dictionary(forKey: "appPresets") as? [String: [String: String]] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: "appPresets") }
     }
 
     static func main() {
@@ -39,6 +42,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Duas cópias disputariam o barramento I2C e brigariam pela taxa: a mais nova sai.
+        if let bundleID = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains(where: { $0 != .current }) {
+            NSApp.terminate(nil)
+            return
+        }
         statusItem.button?.image = NSImage(systemSymbolName: "display", accessibilityDescription: "AB-McHZ")
         statusItem.button?.imagePosition = .imageLeading
         statusItem.button?.title = "…"
@@ -47,14 +56,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         statusItem.menu = menu
         CGDisplayRegisterReconfigurationCallback(displaysChanged, nil)
-        // O EDID virtual some no sleep: ao acordar e a cada minuto, refresh() reaplica se preciso.
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(refreshClicked), name: NSWorkspace.didWakeNotification, object: nil)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(refreshClicked), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        let center = NSWorkspace.shared.notificationCenter
+        // O EDID virtual some no sleep e o macOS pode acordar em 60 Hz: ao acordar, a automação pode corrigir a taxa.
+        center.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+        center.addObserver(self, selector: #selector(didWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        center.addObserver(self, selector: #selector(appActivated), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         Timer.scheduledTimer(timeInterval: 60, target: self, selector: #selector(refreshClicked), userInfo: nil, repeats: true)
-        Task { await refresh() }
+        hotKeys = HotKeys { [weak self] index in self?.hotKeyPressed(index) }
+        Task { await refresh(.connectOrWake) }
     }
 
-    func refresh() async {
+    func refresh(_ trigger: PilotTrigger = .tick) async {
         displays = await engine.refresh().filter { !$0.isVirtual }
         for display in displays where display.hasDDC && edids[display.id] == nil {
             edids[display.id] = try? await engine.edid(for: display.id)
@@ -62,36 +74,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         profiles = Profile.loadAll(in: profilesDirectory)
         updateTitle()
         await repairMissingEDIDs()
-        await optimizeDisplays()
+        await automate(trigger)
     }
 
-    private func optimizeDisplays() async {
-        let online = Set(displays.map(\.id))
-        optimizedConnection.formIntersection(online)
-        manualMode.formIntersection(online)
-        guard autoOptimize, !busy, Licensing.current.allows(.autoOptimize) else { return }
+    private func profile(for display: DisplayInfo) -> Profile? {
+        profiles.first { $0.matches(edid: edids[display.id], name: display.name) }
+    }
+
+    /// PRO. Regras em HetzCore/AutoPilot.swift: preset na borda (app > agenda > padrão), taxa só ao conectar/acordar
+    /// ou quando o preset muda o alvo, modo revertido não é repetido, cor uma vez por conexão.
+    private func automate(_ trigger: PilotTrigger) async {
+        let fresh = pilot.observe(displays.map(\.key), now: .now)
+        let edition = Licensing.current
+        guard autoOptimize, !busy, edition.allows(.autoOptimize) else { return }
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        busy = true
         for display in displays where !display.isBuiltin && !display.isMissingEDID {
-            guard let profile = profiles.first(where: { $0.matches(edid: edids[display.id], name: display.name) }) else { continue }
-            let firstTime = !optimizedConnection.contains(display.id)
-            busy = true
-            let report = await engine.optimize(profile, on: display.id, fixRefresh: !manualMode.contains(display.id), applyDefaultPreset: firstTime)
-            busy = false
-            optimizedConnection.insert(display.id)
-            let changed = switch report.mode { case .success(.alreadyActive), nil: false; default: true }
-            if firstTime || changed { lastResult = "\(profile.monitor.model): \(report.summary)" }
+            guard let profile = profile(for: display) else { continue }
+            let key = display.key
+            var notes: [String] = []
+
+            let mapping = edition.allows(.automation) ? appPresets[profile.id] ?? [:] : [:]
+            let desired = AutoPilot.desiredPreset(profile, frontmostApp: frontmost, appPresets: mapping, now: .now)
+            if let desired, pilot.shouldApply(key, desired: desired), let plan = try? profile.plan(for: desired.name) {
+                var succeeded = true
+                for write in plan.ddc {
+                    do { _ = try await engine.setVCP(write.code, to: write.value, on: display.id) } catch { succeeded = false }
+                }
+                pilot.recordAutomaticPreset(key, desired: desired, succeeded: succeeded)
+                notes.append("preset \(desired.name) (\(desired.reason.rawValue))\(succeeded ? "" : ", DDC falhou")")
+            }
+
+            let target = Optimizer.target(profile, preset: pilot.activePreset(key), offered: engine.modes(for: display.id))
+            let current = CGDisplayCopyDisplayMode(display.id).map(ModeInfo.init)
+            let effective: PilotTrigger = fresh.contains(key) ? .connectOrWake : trigger
+            if case .switchTo(let mode) = pilot.refreshDecision(key, current: current, target: target, trigger: effective) {
+                let spec = DisplayModeSpec(width: mode.width, height: mode.height, hz: mode.hz)
+                let result: Result<ModeSwitchOutcome, ModeError>
+                do throws(ModeError) {
+                    result = .success(try await engine.switchMode(display.id, to: spec, hiDPI: mode.isHiDPI))
+                } catch {
+                    result = .failure(error)
+                }
+                pilot.recordSwitch(key, target: mode, result: result)
+                switch result {
+                case .success(let outcome): notes.append(outcome.description)
+                case .failure(let error): notes.append("modo: \(error)")
+                }
+            }
+
+            if pilot.needsColor(key), let name = profile.macos.colorProfile {
+                pilot.recordColor(key)
+                switch Optimizer.ensureColorProfile(name, on: display.id) {
+                case .success: notes.append("cor \(name)")
+                case .failure(let error): notes.append("cor: \(error)")
+                }
+            }
+            if !notes.isEmpty { lastResult = "\(profile.monitor.model): " + notes.joined(separator: " · ") }
         }
+        busy = false
         displays = await engine.displays.filter { !$0.isVirtual }
         updateTitle()
     }
 
     /// Tela sem EDID no macOS cujo EDID só tem o cabeçalho corrompido: entrega a cópia corrigida ao DCP.
-    /// No máximo uma tentativa por tela a cada 60 s, para não insistir num monitor que não se corrige.
+    /// No máximo `AutoPilot.maxRepairAttempts` por conexão (cada tentativa retreina o link e a tela pisca).
     private func repairMissingEDIDs() async {
-        guard autoRepairEDID else { return }
-        for display in displays where display.isMissingEDID && display.hasDDC {
-            let now = ContinuousClock.now
-            if let last = lastRepairAttempt[display.id], last.duration(to: now) < .seconds(60) { continue }
-            lastRepairAttempt[display.id] = now
+        guard autoRepairEDID, !busy else { return }
+        pilot.observe(displays.map(\.key), now: .now)
+        for display in displays where display.isMissingEDID && display.hasDDC && pilot.mayRepairEDID(display.key) {
+            pilot.recordRepairAttempt(display.key)
             do {
                 let outcome = try await engine.repairEDID(on: display.id)
                 switch outcome {
@@ -142,10 +194,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         repair.toolTip = "Entrega ao macOS o EDID do monitor com o byte 0 corrigido. Desligar devolve o EDID original."
         menu.addItem(repair)
         let edition = Licensing.current
-        let optimize = action("Otimização automática por monitor (PRO)", #selector(toggleAutoOptimize))
+        let optimize = action("Automação por monitor (PRO)", #selector(toggleAutoOptimize))
         optimize.state = autoOptimize ? .on : .off
         optimize.isEnabled = edition.allows(.autoOptimize)
-        optimize.toolTip = "Ao conectar ou acordar: taxa máxima do perfil, perfil de cor e o preset padrão uma vez por conexão."
+        optimize.toolTip = "Taxa máxima ao conectar/acordar, perfil de cor uma vez por conexão e presets por app, por horário ou padrão."
         menu.addItem(optimize)
         menu.addItem(info(edition.description))
         if case .pro = edition {} else { menu.addItem(action("Ativar AB-McHZ PRO…", #selector(activateClicked))) }
@@ -172,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         menu.addItem(modesItem(for: display))
-        if let presets = presetsItem(for: display, edid: edid) { menu.addItem(presets) }
+        if let presets = presetsItem(for: display) { menu.addItem(presets) }
     }
 
     private func modesItem(for display: DisplayInfo) -> NSMenuItem {
@@ -191,23 +243,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return parent
     }
 
-    private func presetsItem(for display: DisplayInfo, edid: EDID?) -> NSMenuItem? {
-        let matching = profiles.filter { $0.matches(edid: edid, name: display.name) }
-        guard !matching.isEmpty else { return nil }
+    private func presetsItem(for display: DisplayInfo) -> NSMenuItem? {
+        guard let profile = profile(for: display) else { return nil }
+        let edition = Licensing.current
+        let allowed = edition.allows(.presets)
         let submenu = NSMenu()
         submenu.autoenablesItems = false
-        let allowed = Licensing.current.allows(.presets)
         if !allowed { submenu.addItem(info("Presets são recurso PRO")) }
-        for profile in matching {
-            if matching.count > 1 { submenu.addItem(.sectionHeader(title: profile.monitor.model)) }
-            for name in profile.presets.keys.sorted() {
-                let preset = profile.presets[name]!
-                let item = action(name + (preset.isDefault ? " (padrão)" : ""), #selector(presetClicked(_:)))
-                item.representedObject = PresetChoice(display: display.id, profile: profile, preset: name)
-                item.toolTip = preset.requires.map { "Requer: \($0)" }
-                item.isEnabled = !busy && allowed
-                submenu.addItem(item)
+        let active = pilot.activePreset(display.key)
+        for (index, name) in profile.presets.keys.sorted().enumerated() {
+            let preset = profile.presets[name]!
+            var label = name + (preset.isDefault ? " (padrão)" : "")
+            if let schedule = preset.schedule { label += " · \(clock(schedule.start))–\(clock(schedule.end))" }
+            let item = action(label, #selector(presetClicked(_:)))
+            item.representedObject = PresetChoice(display: display, profile: profile, preset: name)
+            item.toolTip = preset.requires.map { "Requer: \($0)" }
+            item.state = name == active ? .on : .off
+            item.isEnabled = !busy && allowed
+            if index < 9, edition.allows(.hotkeys) {
+                item.keyEquivalent = String(index + 1)
+                item.keyEquivalentModifierMask = HotKeys.modifiers
             }
+            submenu.addItem(item)
+        }
+        if let app = NSWorkspace.shared.frontmostApplication, app != .current, let bundleID = app.bundleIdentifier {
+            submenu.addItem(.separator())
+            let current = appPresets[profile.id]?[bundleID]
+            let parent = NSMenuItem(title: "Com \(app.localizedName ?? bundleID): \(current ?? "nenhum")", action: nil, keyEquivalent: "")
+            let choices = NSMenu()
+            choices.autoenablesItems = false
+            for name in [nil] + profile.presets.keys.sorted().map(Optional.some) {
+                let item = action(name ?? "Nenhum", #selector(appPresetClicked(_:)))
+                item.representedObject = AppPresetChoice(profileID: profile.id, bundleID: bundleID, preset: name)
+                item.state = name == current ? .on : .off
+                item.isEnabled = edition.allows(.automation)
+                choices.addItem(item)
+            }
+            parent.submenu = choices
+            parent.toolTip = "Preset aplicado sempre que este app vier para a frente (PRO)."
+            submenu.addItem(parent)
         }
         let parent = NSMenuItem(title: allowed ? "Preset" : "Preset (PRO)", action: nil, keyEquivalent: "")
         parent.submenu = submenu
@@ -216,6 +290,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func title(for mode: ModeInfo) -> String {
         "\(mode.width)×\(mode.height) · \(mode.hz) Hz\(mode.isHiDPI ? " HiDPI" : "")"
+    }
+
+    private func clock(_ minutes: Int) -> String {
+        String(format: "%02d:%02d", minutes / 60, minutes % 60)
     }
 
     private func info(_ text: String) -> NSMenuItem {
@@ -235,18 +313,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func modeClicked(_ sender: NSMenuItem) {
         guard let choice = sender.representedObject as? ModeChoice else { return }
-        manualMode.insert(choice.display.id)
         let display = choice.display, mode = choice.mode
         run("Modo") { [weak self] engine in
-            let outcome = try await engine.switchMode(display.id, to: spec(mode), hiDPI: mode.isHiDPI, allowUnsafe: !mode.isSafe)
+            // Modo inseguro só vira permanente depois que o usuário confirma que há imagem.
+            let outcome = try await engine.switchMode(display.id, to: spec(mode), hiDPI: mode.isHiDPI, allowUnsafe: !mode.isSafe, commit: mode.isSafe)
             switch outcome {
             case .reverted where display.isMissingEDID:
                 return "\(outcome) · \(DisplayInfo.missingEDIDHint)"
-            case .applied where !mode.isSafe:
+            case .applied(let observed) where !mode.isSafe:
                 // O watchdog só vê o lado do macOS; se o monitor ficou sem imagem, ninguém confirma e volta sozinho.
-                guard let previous = display.currentMode, self?.confirmKeep(mode, previous: previous) == false else { break }
+                guard let previous = display.currentMode, self?.confirmKeep(mode, previous: previous) == false else {
+                    engine.commitCurrentMode(display.id)
+                    self?.pilot.recordUserMode(display.key, mode: observed)
+                    break
+                }
                 let back = try await engine.switchMode(display.id, to: spec(previous), hiDPI: previous.isHiDPI, allowUnsafe: true)
                 return "não confirmado; \(back)"
+            case .applied(let observed), .alreadyActive(let observed):
+                self?.pilot.recordUserMode(display.key, mode: observed)
             default:
                 break
             }
@@ -280,16 +364,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             lastResult = "PRO ativado para \(try Licensing.activate(field.stringValue).owner)"
+            Task { await refresh(.connectOrWake) }
         } catch {
             lastResult = "PRO: \(error)"
         }
     }
 
     @objc private func presetClicked(_ sender: NSMenuItem) {
-        guard Licensing.current.allows(.presets) else { return }
-        guard let choice = sender.representedObject as? PresetChoice, let plan = try? choice.profile.plan(for: choice.preset) else { return }
-        run("Preset \(choice.preset)") { engine in
-            let report = await engine.apply(plan, to: choice.display)
+        guard let choice = sender.representedObject as? PresetChoice else { return }
+        applyPreset(choice.preset, of: choice.profile, on: choice.display)
+    }
+
+    /// Preset escolhido no menu ou por atalho: modo do preset (ex.: ULMB a 240 Hz) e DDC; vale até o preset
+    /// automático desejado mudar (outro app, outro horário).
+    private func applyPreset(_ name: String, of profile: Profile, on display: DisplayInfo) {
+        guard Licensing.current.allows(.presets), let plan = try? profile.plan(for: name) else { return }
+        run("Preset \(name)") { [weak self] engine in
+            self?.pilot.recordManualPreset(display.key, name: name)
+            let report = await engine.apply(plan, to: display.id)
             let written = report.ddc.filter { (try? $0.result.get()) != nil }.count
             var parts = report.ddc.isEmpty ? [] : ["DDC \(written)/\(report.ddc.count)"]
             switch report.modeAttempts.last?.result {
@@ -297,7 +389,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .failure(let error): parts.append("modo: \(error)")
             case nil: break
             }
+            if let requires = plan.requires { parts.append("requer \(requires)") }
             return parts.joined(separator: " · ")
+        }
+    }
+
+    @objc private func appPresetClicked(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? AppPresetChoice, Licensing.current.allows(.automation) else { return }
+        var all = appPresets
+        all[choice.profileID, default: [:]][choice.bundleID] = choice.preset
+        appPresets = all
+    }
+
+    private func hotKeyPressed(_ index: Int) {
+        guard Licensing.current.allows(.hotkeys), !busy else { return }
+        for display in displays where !display.isBuiltin {
+            guard let profile = profile(for: display) else { continue }
+            let names = profile.presets.keys.sorted()
+            if names.indices.contains(index - 1) { applyPreset(names[index - 1], of: profile, on: display) }
+            break  // uma tela por atalho: o run() aceita uma ação por vez
         }
     }
 
@@ -329,10 +439,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await refresh() }
     }
 
+    @objc private func didWake() {
+        Task { await refresh(.connectOrWake) }
+    }
+
+    /// Troca de app não muda as telas: só reavalia os presets por app, sem varrer o IORegistry.
+    @objc private func appActivated() {
+        Task { await automate(.tick) }
+    }
+
     @objc private func toggleAutoRepair() {
         autoRepairEDID.toggle()
         if autoRepairEDID {
-            lastRepairAttempt = [:]
             Task { await refresh() }
             return
         }
@@ -348,7 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleAutoOptimize() {
         autoOptimize.toggle()
-        if autoOptimize { Task { await refresh() } }
+        if autoOptimize { Task { await refresh(.connectOrWake) } }
     }
 
     @objc private func quitClicked() {
@@ -366,9 +484,15 @@ private func spec(_ mode: ModeInfo) -> DisplayModeSpec {
 }
 
 private struct PresetChoice {
-    let display: CGDirectDisplayID
+    let display: DisplayInfo
     let profile: Profile
     let preset: String
+}
+
+private struct AppPresetChoice {
+    let profileID: String
+    let bundleID: String
+    let preset: String?
 }
 
 /// Chamado pelo CoreGraphics a cada reconfiguração (troca de modo, hotplug); a fase "begin" é ignorada.

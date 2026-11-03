@@ -8,6 +8,8 @@ import Foundation
 public enum ProFeature: String, CaseIterable, Sendable {
     case presets = "aplicar presets dos perfis"
     case autoOptimize = "otimização automática por monitor (taxa máxima, perfil de cor, preset padrão)"
+    case automation = "presets por app em primeiro plano e por horário"
+    case hotkeys = "atalhos ⌃⌥⌘1–9 para presets"
 }
 
 public enum LicenseError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -35,7 +37,7 @@ public struct LicenseKey: Sendable, Equatable {
     }
 
     public static func parse(_ text: String, publicKey: String = embeddedPublicKey) throws(LicenseError) -> LicenseKey {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = clean(text)
         guard trimmed.hasPrefix(prefix) else { throw .malformed }
         let parts = trimmed.dropFirst(prefix.count).split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 2, let payload = Data(base64URL: parts[0]), let signature = Data(base64URL: parts[1]),
@@ -43,6 +45,11 @@ public struct LicenseKey: Sendable, Equatable {
         guard let raw = Data(base64Encoded: publicKey), let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw),
               key.isValidSignature(signature, for: payload) else { throw .badSignature }
         return LicenseKey(owner: decoded.o, issued: decoded.i)
+    }
+
+    /// Chave colada de e-mail chega quebrada em linhas: remove todo espaço em branco.
+    static func clean(_ text: String) -> String {
+        String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) })
     }
 
     /// Emite uma chave. Usado pelo `hetzctl license issue` com a chave privada local e pelos testes.
@@ -86,9 +93,13 @@ public enum Edition: Sendable, Equatable, CustomStringConvertible {
     }
 
     /// Regra pura: chave válida vence; senão avaliação contada do primeiro uso; senão edição livre.
-    public static func resolve(key: String?, trialStart: Date, now: Date, publicKey: String = LicenseKey.embeddedPublicKey) -> Edition {
+    /// `lastSeen` só avança: voltar o relógio não devolve dias, e início no futuro conta como expirado.
+    public static func resolve(key: String?, trialStart: Date, now: Date, lastSeen: Date? = nil,
+                               publicKey: String = LicenseKey.embeddedPublicKey) -> Edition {
         if let key, let license = try? LicenseKey.parse(key, publicKey: publicKey) { return .pro(owner: license.owner) }
-        let elapsed = Calendar(identifier: .gregorian).dateComponents([.day], from: trialStart, to: now).day ?? 0
+        let effectiveNow = max(now, lastSeen ?? now)
+        guard trialStart <= effectiveNow.addingTimeInterval(3600) else { return .free }
+        let elapsed = Calendar(identifier: .gregorian).dateComponents([.day], from: trialStart, to: effectiveNow).day ?? 0
         let left = trialDays - max(0, elapsed)
         return left > 0 ? .trial(daysLeft: left) : .free
     }
@@ -107,13 +118,16 @@ public enum Licensing {
             start = .now
             defaults.set(start, forKey: "trialStart")
         }
-        return Edition.resolve(key: defaults.string(forKey: "licenseKey"), trialStart: start, now: .now)
+        let lastSeen = defaults.object(forKey: "lastSeen") as? Date
+        let now = Date.now
+        if now > (lastSeen ?? .distantPast) { defaults.set(now, forKey: "lastSeen") }
+        return Edition.resolve(key: defaults.string(forKey: "licenseKey"), trialStart: start, now: now, lastSeen: lastSeen)
     }
 
     @discardableResult
     public static func activate(_ text: String) throws(LicenseError) -> LicenseKey {
         let license = try LicenseKey.parse(text)
-        defaults.set(text.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "licenseKey")
+        defaults.set(LicenseKey.clean(text), forKey: "licenseKey")
         return license
     }
 }

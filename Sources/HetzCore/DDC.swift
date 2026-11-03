@@ -77,6 +77,8 @@ final class IOAVBus: I2CBus, @unchecked Sendable {
     }
 
     func write(chip: UInt8, offset: UInt8, _ bytes: [UInt8]) throws(DDCError) {
+        // Escrita só no DDC/CI. 0x50 é a EEPROM do EDID e 0x30 o ponteiro de segmento: gravar ali corrompe o monitor.
+        guard chip == MCCS.chipAddress else { throw .io(kIOReturnNotPermitted) }
         guard let write = PrivateAPI.shared.avWrite else { throw .io(kIOReturnUnsupported) }
         var buffer = bytes
         let result = write(service, UInt32(chip), UInt32(offset), &buffer, UInt32(buffer.count))
