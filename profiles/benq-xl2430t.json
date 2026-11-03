@@ -1,0 +1,119 @@
+{
+  "schema": "ab-mchz/profile@1",
+  "id": "benq-xl2430t",
+  "host": "Mac mini M4",
+  "monitor": {
+    "model": "BenQ XL2430T",
+    "panel": "TN 24\" 1920x1080 144 Hz · 350 cd/m² · 1000:1 · 6-bit+FRC (fonte secundária)",
+    "edid": {
+      "manufacturer": "BNQ",
+      "product": "0x7F3E",
+      "year": 2014,
+      "file": "edid/benq-xl2430t-hdmi.bin"
+    },
+    "firmware": "0x0201 (VCP 0xC9)"
+  },
+  "link": {
+    "current": {
+      "input": "HDMI 2",
+      "vcp60": 18,
+      "max": "1920x1080@60",
+      "evidence": "EDID HDMI desta unidade: pixel clock máx. 170 MHz; manual BenQ: HDMI em 1080p só 60 Hz",
+      "defect": "EEPROM de EDID da entrada HDMI 2 corrompida: byte 0 = 0xFF em vez de 0x00 (checksum 255; com 0x00 fecha em 0). O macOS rejeita o EDID e fica preso em 1280x720@50. Verificado em 2026-11-03 por leitura I2C e pelo hetzctl."
+    },
+    "recommended": {
+      "input": "DisplayPort 1.2",
+      "vcp60": 15,
+      "cable": "USB-C (Thunderbolt do Mac mini) → DisplayPort, direto, sem hub nem adaptador passivo",
+      "mode": "1920x1080@144",
+      "note": "vcp60=15 é o código MCCS padrão de DisplayPort-1; não verificado nesta unidade"
+    }
+  },
+  "macos": {
+    "mode": { "width": 1920, "height": 1080, "hz": 144, "fallbackHz": 60, "hiDPI": false },
+    "connection": "8 bpc · RGB · Full range",
+    "colorProfile": "sRGB IEC61966-2.1",
+    "rationale": "Painel TN com gama ~sRGB e sem medição de colorímetro: sRGB é o perfil mais honesto. HiDPI por espelhamento de tela virtual limita o refresh e soma latência; não compensa num painel de jogo de 92 PPI."
+  },
+  "osdGlobal": {
+    "System > Other Setting > DDC/CI": "ON",
+    "System > Other Setting > Auto Power Off": "OFF",
+    "System > Other Setting > Input Auto Switch": "OFF",
+    "System > Other Setting > Resolution Notice": "OFF",
+    "Display > Display Mode": "Full",
+    "Display > HDMI RGB PC Range": "RGB (0 ~ 255)",
+    "Display > Overscan": "OFF",
+    "rationale": "Auto Power Off e Input Auto Switch fazem o monitor sumir do barramento quando o Mac dorme; no religamento o EDID pode não ser lido (o defeito encontrado em 2026-11-03). Range 0–255 casa com o RGB Full do macOS; o contrário lava os pretos ou esmaga as sombras."
+  },
+  "presets": {
+    "trabalho": {
+      "slot": "Gamer 3 (S Switch)",
+      "default": true,
+      "osd": {
+        "Picture Mode": "Standard → salvar em Gamer 3",
+        "Brightness": 25,
+        "Contrast": 50,
+        "Sharpness": 5,
+        "Gamma": 3,
+        "Color Temperature": "User Define · R 93 · G 88 · B 97",
+        "AMA": "High",
+        "Dynamic Contrast": 0,
+        "Black eQualizer": 0,
+        "Color Vibrance": 10,
+        "Low Blue Light": 0,
+        "Blur Reduction": "OFF",
+        "Instant Mode": "ON"
+      },
+      "ddc": { "0x10": 25, "0x12": 50, "0x14": 11, "0x16": 93, "0x18": 88, "0x1A": 97 },
+      "rationale": "Alvo ~120 cd/m² numa sala iluminada (brilho 25 é estimativa sem colorímetro; ajuste até o branco parecer papel). Ganhos RGB 93/88/97 preservados: foram medidos nesta unidade e são uma calibração deliberada. Contraste acima de 50 estoura brancos neste TN. Nitidez 5 é neutra (7 cria halos em texto). Gamma 3 ≈ 2.2. AMA High é o overdrive sem overshoot visível; Premium gera rastro claro. Instant Mode corta o processamento do scaler."
+    },
+    "competitivo": {
+      "slot": "Gamer 1 (S Switch)",
+      "requires": "DisplayPort 144 Hz",
+      "osd": {
+        "Picture Mode": "partir do preset trabalho → salvar em Gamer 1",
+        "Brightness": 55,
+        "Contrast": 50,
+        "Sharpness": 5,
+        "Gamma": 3,
+        "Color Temperature": "User Define · R 93 · G 88 · B 97",
+        "AMA": "High",
+        "Black eQualizer": 12,
+        "Color Vibrance": 12,
+        "Low Blue Light": 0,
+        "Blur Reduction": "OFF (opcional ON a 144 Hz: Brightness 100, Intensity 10, Area 50)",
+        "Instant Mode": "ON"
+      },
+      "ddc": { "0x10": 55, "0x12": 50 },
+      "rationale": "Black eQualizer 12 abre sombras sem lavar o céu; Color Vibrance 12 separa silhuetas de fundo. Blur Reduction (strobe) reduz o borrão mas escurece e cintila; só faz sentido a 144 Hz com fps acima de 100. Na HDMI a 60 Hz deixe OFF."
+    },
+    "noite": {
+      "slot": "Gamer 2 (S Switch)",
+      "osd": {
+        "Picture Mode": "partir do preset trabalho → salvar em Gamer 2",
+        "Brightness": 8,
+        "Contrast": 50,
+        "Gamma": 3,
+        "Color Temperature": "User Define · R 93 · G 88 · B 97",
+        "Low Blue Light": 0,
+        "AMA": "High",
+        "Instant Mode": "ON"
+      },
+      "ddc": { "0x10": 8 },
+      "macos": "Night Shift agendado (pôr do sol → nascer), temperatura no terço mais quente",
+      "rationale": "Brilho baixo no hardware preserva a gradação melhor que filtro de software. O amarelamento fica com o Night Shift, que é gradual e reversível; o Low Blue Light do monitor é um degrau fixo."
+    }
+  },
+  "baseline": {
+    "measuredAt": "2026-11-03",
+    "via": "DDC/CI (BetterDisplay CLI, leitura)",
+    "ddc": { "0x10": 75, "0x12": 50, "0x14": 11, "0x16": 93, "0x18": 88, "0x1A": 97, "0x60": 18, "0x87": 7, "0xDC": 24, "0xD6": 1, "0xC9": 513, "0x6C": 50, "0x6E": 50, "0x70": 50 },
+    "osdOnly": ["AMA", "Black eQualizer", "Color Vibrance", "Blur Reduction", "Instant Mode", "Gamma", "Picture Mode"]
+  },
+  "sources": [
+    "Manual oficial XL Series (2015): https://esupportdownload.benq.com/esupport/LCD%20Monitor/UserManual/LCD%20Monitor_um_User%20Manual_20151022_163841XL30_EN.pdf",
+    "Data sheet oficial: https://benqimage.blob.core.windows.net/driver-us-file/XL2430T_SpecSheet_BQus_Oct2015.pdf",
+    "Modos predefinidos BenQ XL 1080p: https://esupportdownload.benq.com/esupport/LCD%20Monitor/UserManual/LCD%20Monitor_um_Others_20160204_104953screenresolution_EN.pdf",
+    "Medição local: EDID por I2C + leitura DDC, 2026-11-03"
+  ]
+}

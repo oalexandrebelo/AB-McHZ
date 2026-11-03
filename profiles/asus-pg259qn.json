@@ -1,0 +1,98 @@
+{
+  "schema": "ab-mchz/profile@1",
+  "id": "asus-pg259qn",
+  "host": "MacBook Pro M5 Pro",
+  "monitor": {
+    "model": "ASUS ROG Swift PG259QN",
+    "panel": "Fast IPS 24.5\" 1920x1080 360 Hz · 400 cd/m² · 1000:1 · módulo NVIDIA G-SYNC",
+    "factoryCalibration": {
+      "mode": "SDR · Default mode",
+      "timing": "FHD 60 Hz",
+      "input": "DisplayPort",
+      "gamma": 2.2,
+      "avgDeltaE": 0.49,
+      "grayscale": "~6500 K plano de L8 a L248",
+      "instrument": "UPRTek MK550T",
+      "source": "Color Calibration Testing Report da caixa (foto enviada em 2026-11-03)"
+    }
+  },
+  "link": {
+    "recommended": {
+      "input": "DisplayPort 1.4",
+      "cable": "USB-C (Thunderbolt do MacBook) → DisplayPort 1.4 HBR3, certificado VESA, até 2 m, sem hub",
+      "mode": "1920x1080@360 · 8 bpc"
+    },
+    "limits": {
+      "DisplayPort 360 Hz": "só 8 bpc (manual: 10/12 bpc não suportado)",
+      "HDMI 2.0": "1080p até 240 Hz; a 240 Hz sem 10/12 bpc",
+      "G-SYNC": "só pela DisplayPort"
+    }
+  },
+  "macos": {
+    "mode": { "width": 1920, "height": 1080, "hz": 360, "fallbackHz": 240, "hiDPI": false },
+    "connection": "8 bpc · RGB · Full range",
+    "colorProfile": "sRGB IEC61966-2.1",
+    "vrr": "Testar: se Ajustes do Sistema > Telas oferecer 'Variável', usar. Se não, 360 Hz fixo. O módulo G-SYNC desta geração não tem suporte Adaptive-Sync com Mac confirmado.",
+    "hdr": "OFF",
+    "rationale": "O relatório de fábrica mede ΔE 0,49 contra sRGB no modo padrão: perfil sRGB no macOS + modo de fábrica no monitor é a combinação mais fiel possível sem colorímetro. HDR10 sem certificação DisplayHDR e pico de 400 nits não melhora nada no Mac."
+  },
+  "osdGlobal": {
+    "System Setup > DisplayPort Deep Sleep": "OFF",
+    "System Setup > Auto SDR Brightness": "OFF",
+    "Image > Variable Backlight": "OFF",
+    "Image > Aspect Control": "Full",
+    "Input Select > Input Auto Switch": "OFF",
+    "Color > DP SDR YCbCr sRGB Gamma": "ON",
+    "rationale": "Deep Sleep e Auto Switch fazem o monitor sumir do link quando o Mac dorme e são a causa clássica de telas reorganizadas ou sem EDID no despertar (o mesmo defeito achado no Mac mini). Variable Backlight e Auto SDR Brightness mexem no brilho sozinhos e desfazem a calibração."
+  },
+  "presets": {
+    "trabalho": {
+      "default": true,
+      "osd": {
+        "GameVisual": "modo de fábrica (o 'Default mode' do relatório; após All Reset, é o que vier selecionado)",
+        "Brightness": 30,
+        "Contrast": 50,
+        "Color Temp.": "padrão de fábrica (não mexer)",
+        "Gamma": 2.2,
+        "Six-axis Saturation": "padrão de fábrica (não mexer)",
+        "OD": "Normal",
+        "Dark Boost": "OFF",
+        "Blue Light Filter": 0,
+        "ULMB": "OFF"
+      },
+      "ddc": { "0x10": 30 },
+      "rationale": "Só brilho e overdrive saem do padrão; o resto é a calibração de ΔE 0,49. Brilho 30 é estimativa para ~120 cd/m² (padrão 67 ≈ 270 cd/m²). OD Normal: Extreme cria halo claro em transições escuras. Brilho por DDC depende do módulo G-SYNC responder; se não responder, o AB-McHZ cai para brilho por software."
+    },
+    "competitivo": {
+      "osd": {
+        "GameVisual": "modo de fábrica",
+        "Brightness": 60,
+        "Contrast": 50,
+        "Gamma": 2.2,
+        "OD": "Normal",
+        "Dark Boost": "nível mais baixo",
+        "ULMB": "OFF"
+      },
+      "ddc": { "0x10": 60 },
+      "rationale": "Mais luz e um degrau de Dark Boost para enxergar em sombra, sem trocar o GameVisual (trocar descarta a calibração de fábrica)."
+    },
+    "ulmb": {
+      "requires": "DisplayPort · 240 Hz fixo · VRR desligado",
+      "macos": { "hz": 240 },
+      "osd": {
+        "ULMB": "ON",
+        "ULMB Pulse Width": "meio da escala; reduzir até o fantasma sumir",
+        "Brightness": 100,
+        "OD": "indisponível com ULMB (manual)"
+      },
+      "rationale": "Strobe de backlight: maior nitidez em movimento disponível neste monitor, ao custo de brilho e cintilação. Só a 144 ou 240 Hz pela DP."
+    }
+  },
+  "matching": "Este monitor é a referência de cor da mesa. Iguale o XG259QN a ele, e não o contrário.",
+  "sources": [
+    "Manual oficial PG259QN/PG259QNR (2023-06-19): https://dlcdnets.asus.com/pub/ASUS/LCD%20Monitors/PG259QN/PG259_English.pdf",
+    "Especificação oficial: https://rog.asus.com/monitors/23-to-24-5-inches/rog-swift-360hz-pg259qn-model/spec/",
+    "Review Tom's Hardware (secundária): https://www.tomshardware.com/reviews/asus-rog-swift-pg259qn-360hz-monitor-review-elite-speed",
+    "Relatório de calibração de fábrica desta unidade"
+  ]
+}

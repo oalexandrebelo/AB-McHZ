@@ -1,0 +1,75 @@
+{
+  "schema": "ab-mchz/profile@1",
+  "id": "asus-xg259qn",
+  "host": "MacBook Pro M5 Pro",
+  "monitor": {
+    "model": "ASUS ROG Strix XG259QN",
+    "panel": "Fast IPS 24.5\" 1920x1080 360 Hz nativo (380 Hz OC) · 400 cd/m² · 1000:1 · 110% sRGB · DisplayHDR 400"
+  },
+  "link": {
+    "recommended": {
+      "input": "DisplayPort 1.4",
+      "cable": "USB-C (Thunderbolt do MacBook, porta diferente da do PG259QN) → DisplayPort 1.4 HBR3, certificado VESA, até 2 m, sem hub",
+      "mode": "1920x1080@360 · 8 bpc"
+    },
+    "limits": {
+      "HDMI 2.0": "1080p até 240 Hz (VRR 48–240 Hz)",
+      "DisplayPort": "VRR 60–380 Hz; 370/380 Hz só com Overclocking ON",
+      "DisplayPort Stream 1.2": "não carrega 360 Hz (≈22 Gbps > HBR2)"
+    }
+  },
+  "macos": {
+    "mode": { "width": 1920, "height": 1080, "hz": 360, "fallbackHz": 240, "hiDPI": false },
+    "connection": "8 bpc · RGB · Full range",
+    "colorProfile": "sRGB IEC61966-2.1",
+    "vrr": "Variável (Adaptive-Sync certificado VESA): em Ajustes do Sistema > Telas > Taxa de atualização, escolher 'Variável' quando oferecido",
+    "hdr": "OFF",
+    "rationale": "Painel acima de sRGB (110%): o modo sRGB do monitor + perfil sRGB evita cor saturada em app sem gerenciamento de cor. DisplayHDR 400 trava quase todo o OSD e não tem contraste para HDR real."
+  },
+  "osdGlobal": {
+    "System Setup > OSD Setup > DDC/CI": "ON",
+    "System Setup > DisplayPort Stream": "DisplayPort 1.4",
+    "System Setup > Power Setting": "Standard Mode",
+    "Input Select > Auto Input Detection": "OFF",
+    "Gaming > Overclocking": "OFF",
+    "Gaming > Variable Refresh Rate": "ON",
+    "Image > ASCR": "OFF",
+    "Image > Aspect Control": "Full",
+    "rationale": "DP 1.4 é obrigatório para 360 Hz. Overclocking a 380 Hz dá +5% de refresh e o próprio manual avisa de cintilação: não compensa num Mac. Auto Input Detection desligado pelo mesmo motivo do Deep Sleep no PG259QN. ASCR (contraste dinâmico) bombeia o brilho."
+  },
+  "presets": {
+    "trabalho": {
+      "default": true,
+      "osd": {
+        "GameVisual": "sRGB",
+        "Brightness": 25,
+        "VividPixel": "mínimo (sem nitidez extra)",
+        "Variable OD": "padrão (o manual mostra 10); se aparecer halo claro atrás de objetos em movimento, descer 2 por vez",
+        "Shadow Boost": "OFF",
+        "Blue Light Filter": 0,
+        "ELMB / ELMB SYNC": "OFF"
+      },
+      "ddc": { "0x10": 25 },
+      "match": "Abra uma janela branca cobrindo os dois monitores e ajuste o brilho deste até igualar o PG259QN. Se o sRGB deste não segurar o vermelho (vermelho visivelmente mais saturado que no PG259QN), troque para GameVisual Racing + Color Temp. Normal + Gamma 2.2 + Saturation 50.",
+      "rationale": "O modo sRGB trava temperatura, contraste, gama e saturação no alvo de fábrica (ASUS declara ΔE<2) e ainda deixa o brilho livre: é o modo certo para mesa de trabalho. Brilho 25 é estimativa para ~120 cd/m²; o valor final é o que casa com o PG259QN."
+    },
+    "competitivo": {
+      "osd": {
+        "GameVisual": "FPS",
+        "Brightness": 60,
+        "Gamma": 2.2,
+        "Shadow Boost": "nível 1",
+        "Variable OD": "padrão",
+        "ELMB SYNC": "OFF (opcional ON: exige VRR ON e mais de 60 Hz na DP)"
+      },
+      "ddc": { "0x10": 60 },
+      "save": "MyFavorite > Customized Setting > salvar no slot 1",
+      "rationale": "FPS abre médios-escuros; Shadow Boost só um degrau para não lavar o preto do IPS. ELMB SYNC é strobe com VRR: mais nitidez em movimento, menos brilho e possível cintilação na base da faixa VRR."
+    }
+  },
+  "sources": [
+    "Manual oficial XG259QN (2023-07-04): https://dlcdnets.asus.com/pub/ASUS/LCD%20Monitors/XG259QN/XG259QN_English.pdf",
+    "Especificação oficial: https://rog.asus.com/monitors/23-to-24-5-inches/rog-strix-xg259qn/spec/",
+    "TFTCentral (secundária): https://tftcentral.co.uk/news/asus-rog-strix-xg259qn-with-24-5-1080p-ips-panel-and-380hz-overclocked-refresh-rate"
+  ]
+}
