@@ -49,7 +49,7 @@ swift build -c release && .build/release/hetzctl list
 - `Sources/hetzctl`: CLI.
 - `Sources/ABMcHZApp`: app da barra de menus.
 - `profiles/`: perfis medidos por monitor.
-- `docs/`: arquitetura, perfis e o que falta para o produto.
+- `docs/`: arquitetura, perfis, o que falta para o produto, oportunidades PRO (`PRO-OPORTUNIDADES.md`) e revisão de código (`REVISAO-CODIGO.md`).
 
 ## Origem e créditos
 
