@@ -26,37 +26,56 @@ A automação não briga com você:
 - modo que não pegou não é tentado de novo;
 - um sleep curto (até 5 min) não conta como reconexão.
 
-O PRO vem com **14 dias de avaliação** a partir do primeiro uso. Depois disso, ative com uma chave de licença:
+O PRO vem com **14 dias de avaliação** a partir do primeiro uso. A licença PRO é **vitalícia** e fica **vinculada ao Mac e ao usuário de login** para o qual foi emitida: a chave guarda só um hash do UUID do Mac com o nome do usuário, sem nenhum identificador legível. Ative em **Ajustes… › Licença** ou:
 
 ```bash
+hetzctl license machine                  # vínculo deste Mac/usuário, para pedir uma chave
 hetzctl license activate ABMCHZ-PRO.…
-hetzctl optimize benq --dry-run   # mostra o que a otimização faria
 ```
 
-ou pelo menu **Ativar AB-McHZ PRO…**. A chave é verificada offline (assinatura Ed25519), sem conta nem internet.
+A chave é verificada offline (assinatura Ed25519), sem conta nem internet. Como o código é aberto, a licença é um acordo, não uma trava.
 
 ## Instalar
 
-Requer macOS 14+ e Xcode 16+ (Swift 6).
+1. Baixe o `AB-McHZ-<versão>.dmg` na [última release](https://github.com/oalexandrebelo/AB-McHZ/releases/latest).
+2. Abra o DMG e arraste o **AB-McHZ** para **Aplicativos**.
+3. Abra o AB-McHZ. Ele aparece na barra de menus com a taxa das telas (ex.: `60Hz`) e passa a abrir sozinho no login.
+
+Requer macOS 14 ou mais novo num Mac com Apple Silicon (o DDC usa o `IOAVService`, que só existe no Apple Silicon).
+
+**Primeira abertura.** Enquanto as releases não forem assinadas com Developer ID (conta Apple Developer), o macOS bloqueia a primeira abertura de app baixado da internet. Abra uma vez, clique em **OK** e vá em **Ajustes do Sistema › Privacidade e Segurança › Abrir Mesmo Assim**. Só na primeira vez.
+
+**No app:**
+- **Ajustes…** (⌘,, ou abrir o app de novo): abrir no login, reparo de EDID, automação, licença, linha de comando, pasta de perfis, atualizações.
+- **Linha de comando:** o `hetzctl` vem dentro do app. Em Ajustes › Linha de comando, **Instalar hetzctl** cria o link `/usr/local/bin/hetzctl` (pede a senha de administrador).
+- **Perfis:** os do BenQ XL2430T e dos ASUS PG259QN/XG259QN vêm no app. Um `.json` com o mesmo `id` em `~/Library/Application Support/AB-McHZ/profiles` substitui o do app (`hetzctl profiles` mostra o que está valendo).
+- **Atualizações:** uma vez por dia o app consulta a última release do GitHub e mostra **Baixar versão X…** no menu quando há versão nova (desligável em Ajustes).
+
+**Desinstalar:** saia pelo menu e arraste o app de Aplicativos para o Lixo. Preferências e licença ficam em `defaults` (`org.ab-mchz.AB-McHZ`, `org.ab-mchz.shared`).
+
+**Quem instalou a 0.2 pelo `scripts/install.sh`:** na primeira abertura a versão nova remove o LaunchAgent antigo, manda `~/Applications/AB-McHZ.app` para o Lixo, troca a cópia de `~/.local/bin/hetzctl` por um link para o app e apaga perfis copiados que não foram editados.
+
+## Compilar
+
+Requer Xcode 16 ou mais novo (Swift 6).
 
 ```bash
-scripts/install.sh
+swift test                                   # testes
+ABMCHZ_PROFILES=$PWD/profiles swift run AB-McHZ   # app direto do código, com os perfis do repositório
+scripts/package.sh                           # dist/AB-McHZ.app e dist/AB-McHZ-<versão>.dmg
 ```
 
-Compila, instala `~/Applications/AB-McHZ.app` com o ícone AB (aberto no login por um LaunchAgent) e o `hetzctl` em `~/.local/bin`. Perfis já instalados não são sobrescritos. Para remover: `scripts/uninstall.sh`.
+`package.sh` assina ad hoc. Com `SIGN_IDENTITY="Developer ID Application: …"` assina com hardened runtime e, com `NOTARY_PROFILE`, notariza e grampeia o DMG.
 
-CLI:
-
-```bash
-swift build -c release && .build/release/hetzctl list
-```
+**Release:** atualize `VERSION`, faça commit e crie a tag `v<versão>`. O workflow `release.yml` testa, gera o DMG e publica a release (assinada e notarizada se os segredos de Developer ID estiverem configurados).
 
 ## Estrutura
 
 - `Sources/HetzCore`: motor (DDC/MCCS por `IOAVService`, EDID por I2C, modos com watchdog, perfis, licença).
 - `Sources/hetzctl`: CLI.
-- `Sources/ABMcHZApp`: app da barra de menus.
-- `profiles/`: perfis medidos por monitor.
+- `Sources/ABMcHZApp`: app da barra de menus e janela de Ajustes.
+- `profiles/`: perfis medidos por monitor (vão dentro do app).
+- `packaging/`: `Info.plist` do app; `scripts/package.sh` monta o app e o DMG; `.github/workflows/`: CI e release.
 - `docs/`: arquitetura, perfis, o que falta para o produto, oportunidades PRO (`PRO-OPORTUNIDADES.md`) e revisão de código (`REVISAO-CODIGO.md`).
 
 ## Origem e créditos

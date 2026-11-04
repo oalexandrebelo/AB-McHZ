@@ -118,10 +118,29 @@ public struct Profile: Decodable, Sendable, Equatable {
         return profile
     }
 
-    /// Onde o app instalado procura perfis (o install.sh copia `profiles/` do repositório para lá).
-    public static var directory: URL {
+    /// Perfis do usuário: um arquivo aqui com o mesmo `id` de um perfil do app substitui o do app.
+    public static var userDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AB-McHZ/profiles", isDirectory: true)
+    }
+
+    /// `AB-McHZ.app/Contents/Resources/profiles`, achado a partir do executável real: vale para o app e para o
+    /// hetzctl em `Contents/MacOS`, mesmo chamado por um link simbólico (ex.: /usr/local/bin/hetzctl).
+    public static var bundledDirectory: URL? {
+        var size: UInt32 = 0
+        _NSGetExecutablePath(nil, &size)
+        var buffer = [CChar](repeating: 0, count: Int(size))
+        guard _NSGetExecutablePath(&buffer, &size) == 0 else { return nil }
+        let directory = URL(fileURLWithFileSystemRepresentation: buffer, isDirectory: false, relativeTo: nil).resolvingSymlinksInPath()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/profiles", isDirectory: true)
+        return FileManager.default.fileExists(atPath: directory.path) ? directory : nil
+    }
+
+    /// Do menos para o mais prioritário. `ABMCHZ_PROFILES` (desenvolvimento, ex.: `profiles/` do repositório) substitui as duas.
+    public static var searchDirectories: [URL] {
+        if let folder = ProcessInfo.processInfo.environment["ABMCHZ_PROFILES"] { return [URL(fileURLWithPath: folder)] }
+        return [bundledDirectory, userDirectory].compactMap { $0 }
     }
 
     /// Perfis válidos da pasta, em ordem de nome; arquivo inválido é ignorado.
@@ -130,6 +149,15 @@ public struct Profile: Decodable, Sendable, Equatable {
         return files.filter { $0.pathExtension == "json" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .compactMap { try? load(from: $0) }
+    }
+
+    /// Junta as pastas por `id`: a pasta seguinte substitui o perfil de mesmo id da anterior, na mesma posição.
+    public static func loadAll(in directories: [URL]) -> [Profile] {
+        var merged: [Profile] = []
+        for profile in directories.flatMap(loadAll(in:)) {
+            if let index = merged.firstIndex(where: { $0.id == profile.id }) { merged[index] = profile } else { merged.append(profile) }
+        }
+        return merged
     }
 
     /// Pelo EDID quando o perfil o identifica; senão pelo modelo (última palavra, ex.: "PG259QN") no nome da tela.

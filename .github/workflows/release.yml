@@ -1,0 +1,53 @@
+# Tag vX.Y.Z (igual ao arquivo VERSION) → testes, DMG e release no GitHub.
+# Com os segredos DEVELOPER_ID_P12 (base64), DEVELOPER_ID_PASSWORD, NOTARY_APPLE_ID, NOTARY_TEAM_ID e
+# NOTARY_PASSWORD (senha de app), o DMG sai assinado com Developer ID e notarizado; sem eles, assinatura ad hoc.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      HAS_DEVELOPER_ID: ${{ secrets.DEVELOPER_ID_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Xcode mais novo do runner
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+      - name: Tag igual ao VERSION
+        run: test "${GITHUB_REF_NAME#v}" = "$(cat VERSION)"
+      - run: swift test
+      - name: Developer ID e notarização
+        if: env.HAS_DEVELOPER_ID == 'true'
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          xcrun notarytool store-credentials ab-mchz --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD"
+          echo "SIGN_IDENTITY=Developer ID Application" >> "$GITHUB_ENV"
+          echo "NOTARY_PROFILE=ab-mchz" >> "$GITHUB_ENV"
+      - run: zsh scripts/package.sh
+      - name: Release com o DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shasum -a 256 dist/*.dmg
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg --title "AB-McHZ ${GITHUB_REF_NAME#v}" --generate-notes

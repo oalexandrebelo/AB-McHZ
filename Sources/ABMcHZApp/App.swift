@@ -19,19 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var repairedEDID: Set<CGDirectDisplayID> = []
     private var pilot = AutoPilot()
     private var hotKeys: HotKeys?
-    private var autoRepairEDID: Bool {
-        get { UserDefaults.standard.object(forKey: "autoRepairEDID") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "autoRepairEDID") }
-    }
-    private var autoOptimize: Bool {
-        get { UserDefaults.standard.object(forKey: "autoOptimize") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "autoOptimize") }
-    }
-    /// id do perfil → bundle id do app → preset.
-    private var appPresets: [String: [String: String]] {
-        get { UserDefaults.standard.dictionary(forKey: "appPresets") as? [String: [String: String]] ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: "appPresets") }
-    }
+    private let settings = AppSettings()
+    private let settingsWindow = SettingsWindow()
 
     static func main() {
         let app = NSApplication.shared
@@ -42,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let migrated = LegacyInstall.migrate()
+        if !migrated.isEmpty { lastResult = "Instalação antiga: " + migrated.joined(separator: " · ") }
         // Duas cópias disputariam o barramento I2C e brigariam pela taxa: a mais nova sai.
         if let bundleID = Bundle.main.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains(where: { $0 != .current }) {
@@ -63,7 +54,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         center.addObserver(self, selector: #selector(appActivated), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         Timer.scheduledTimer(timeInterval: 60, target: self, selector: #selector(refreshClicked), userInfo: nil, repeats: true)
         hotKeys = HotKeys { [weak self] index in self?.hotKeyPressed(index) }
-        Task { await refresh(.connectOrWake) }
+        settings.onAutoRepairChange = { [weak self] on in self?.autoRepairChanged(on) }
+        settings.onAutoOptimizeChange = { [weak self] on in if on { Task { await self?.refresh(.connectOrWake) } } }
+        settings.onCheckUpdatesChange = { [weak self] on in if on { Task { await self?.checkForUpdate() } } }
+        settings.onEditionChange = { [weak self] in Task { await self?.refresh(.connectOrWake) } }
+        settings.registerLoginItemOnFirstLaunch()
+        Timer.scheduledTimer(timeInterval: 6 * 3600, target: self, selector: #selector(updateTimerFired), userInfo: nil, repeats: true)
+        Task {
+            await refresh(.connectOrWake)
+            await checkForUpdate(ifDueOnly: true)
+        }
+    }
+
+    /// Abrir o app de novo (Finder, Spotlight, Launchpad) com ele já na barra de menus mostra os Ajustes.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settingsClicked()
+        return false
+    }
+
+    /// Uma consulta por dia à última release do GitHub; "Procurar agora" ignora o intervalo.
+    func checkForUpdate(ifDueOnly: Bool = false) async {
+        let defaults = UserDefaults.standard
+        if ifDueOnly {
+            guard settings.checkUpdates else { return }
+            if let last = defaults.object(forKey: "lastUpdateCheck") as? Date, Date.now.timeIntervalSince(last) < 86_400 { return }
+        }
+        guard let current = AppVersion(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") else { return }
+        defaults.set(Date.now, forKey: "lastUpdateCheck")
+        settings.availableUpdate = await UpdateCheck.fetch(current: current)
+    }
+
+    @objc private func updateTimerFired() {
+        Task { await checkForUpdate(ifDueOnly: true) }
     }
 
     func refresh(_ trigger: PilotTrigger = .tick) async {
@@ -71,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for display in displays where display.hasDDC && edids[display.id] == nil {
             edids[display.id] = try? await engine.edid(for: display.id)
         }
-        profiles = Profile.loadAll(in: profilesDirectory)
+        profiles = Profile.loadAll(in: Profile.searchDirectories)
         updateTitle()
         await repairMissingEDIDs()
         await automate(trigger)
@@ -86,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func automate(_ trigger: PilotTrigger) async {
         let fresh = pilot.observe(displays.map(\.key), now: .now)
         let edition = Licensing.current
-        guard autoOptimize, !busy, edition.allows(.autoOptimize) else { return }
+        guard settings.autoOptimize, !busy, edition.allows(.autoOptimize) else { return }
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         busy = true
         for display in displays where !display.isBuiltin && !display.isMissingEDID {
@@ -94,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let key = display.key
             var notes: [String] = []
 
-            let mapping = edition.allows(.automation) ? appPresets[profile.id] ?? [:] : [:]
+            let mapping = edition.allows(.automation) ? settings.appPresets[profile.id] ?? [:] : [:]
             let desired = AutoPilot.desiredPreset(profile, frontmostApp: frontmost, appPresets: mapping, now: .now)
             if let desired, pilot.shouldApply(key, desired: desired), let plan = try? profile.plan(for: desired.name) {
                 var succeeded = true
@@ -140,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Tela sem EDID no macOS cujo EDID só tem o cabeçalho corrompido: entrega a cópia corrigida ao DCP.
     /// No máximo `AutoPilot.maxRepairAttempts` por conexão (cada tentativa retreina o link e a tela pisca).
     private func repairMissingEDIDs() async {
-        guard autoRepairEDID, !busy else { return }
+        guard settings.autoRepairEDID, !busy else { return }
         pilot.observe(displays.map(\.key), now: .now)
         for display in displays where display.isMissingEDID && display.hasDDC && pilot.mayRepairEDID(display.key) {
             pilot.recordRepairAttempt(display.key)
@@ -161,10 +183,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lastResult = "EDID: \(error)"
             }
         }
-    }
-
-    private var profilesDirectory: URL {
-        ProcessInfo.processInfo.environment["ABMCHZ_PROFILES"].map { URL(fileURLWithPath: $0) } ?? Profile.directory
     }
 
     /// Só as externas quando houver alguma (é delas que se quer saber a taxa); senão a interna.
@@ -189,19 +207,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(info(lastResult))
             menu.addItem(.separator())
         }
+        if let update = settings.availableUpdate {
+            menu.addItem(action("Baixar versão \(update.version)…", #selector(updateClicked)))
+            menu.addItem(.separator())
+        }
         let repair = action("Corrigir EDID com cabeçalho corrompido", #selector(toggleAutoRepair))
-        repair.state = autoRepairEDID ? .on : .off
+        repair.state = settings.autoRepairEDID ? .on : .off
         repair.toolTip = "Entrega ao macOS o EDID do monitor com o byte 0 corrigido. Desligar devolve o EDID original."
         menu.addItem(repair)
         let edition = Licensing.current
         let optimize = action("Automação por monitor (PRO)", #selector(toggleAutoOptimize))
-        optimize.state = autoOptimize ? .on : .off
+        optimize.state = settings.autoOptimize ? .on : .off
         optimize.isEnabled = edition.allows(.autoOptimize)
         optimize.toolTip = "Taxa máxima ao conectar/acordar, perfil de cor uma vez por conexão e presets por app, por horário ou padrão."
         menu.addItem(optimize)
         menu.addItem(info(edition.description))
-        if case .pro = edition {} else { menu.addItem(action("Ativar AB-McHZ PRO…", #selector(activateClicked))) }
+        if case .pro = edition {} else { menu.addItem(action("Ativar AB-McHZ PRO…", #selector(settingsClicked))) }
+        menu.addItem(.separator())
         menu.addItem(action("Atualizar telas", #selector(refreshClicked)))
+        menu.addItem(action("Ajustes…", #selector(settingsClicked), key: ","))
+        menu.addItem(action("Sobre o AB-McHZ", #selector(aboutClicked)))
         menu.addItem(action("Sair do AB-McHZ", #selector(quitClicked), key: "q"))
     }
 
@@ -268,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let app = NSWorkspace.shared.frontmostApplication, app != .current, let bundleID = app.bundleIdentifier {
             submenu.addItem(.separator())
-            let current = appPresets[profile.id]?[bundleID]
+            let current = settings.appPresets[profile.id]?[bundleID]
             let parent = NSMenuItem(title: "Com \(app.localizedName ?? bundleID): \(current ?? "nenhum")", action: nil, keyEquivalent: "")
             let choices = NSMenu()
             choices.autoenablesItems = false
@@ -351,23 +376,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    @objc private func activateClicked() {
-        let alert = NSAlert()
-        alert.messageText = "Ativar AB-McHZ PRO"
-        alert.informativeText = "Cole a chave de licença (começa com ABMCHZ-PRO.)."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Ativar")
-        alert.addButton(withTitle: "Cancelar")
+    @objc private func settingsClicked() {
+        settingsWindow.show(settings) { [weak self] in await self?.checkForUpdate() }
+    }
+
+    @objc private func aboutClicked() {
         NSApp.activate()
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        do {
-            lastResult = "PRO ativado para \(try Licensing.activate(field.stringValue).owner)"
-            Task { await refresh(.connectOrWake) }
-        } catch {
-            lastResult = "PRO: \(error)"
-        }
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .credits: NSAttributedString(string: "Uso pessoal e não comercial · PolyForm Noncommercial 1.0.0\ngithub.com/oalexandrebelo/AB-McHZ"),
+        ])
+    }
+
+    @objc private func updateClicked() {
+        if let page = settings.availableUpdate?.page { NSWorkspace.shared.open(page) }
     }
 
     @objc private func presetClicked(_ sender: NSMenuItem) {
@@ -396,9 +417,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func appPresetClicked(_ sender: NSMenuItem) {
         guard let choice = sender.representedObject as? AppPresetChoice, Licensing.current.allows(.automation) else { return }
-        var all = appPresets
+        var all = settings.appPresets
         all[choice.profileID, default: [:]][choice.bundleID] = choice.preset
-        appPresets = all
+        settings.appPresets = all
     }
 
     private func hotKeyPressed(_ index: Int) {
@@ -449,8 +470,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleAutoRepair() {
-        autoRepairEDID.toggle()
-        if autoRepairEDID {
+        settings.autoRepairEDID.toggle()
+    }
+
+    private func autoRepairChanged(_ on: Bool) {
+        if on {
             Task { await refresh() }
             return
         }
@@ -465,8 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleAutoOptimize() {
-        autoOptimize.toggle()
-        if autoOptimize { Task { await refresh(.connectOrWake) } }
+        settings.autoOptimize.toggle()
     }
 
     @objc private func quitClicked() {

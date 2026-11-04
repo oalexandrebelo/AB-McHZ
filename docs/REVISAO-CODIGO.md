@@ -6,7 +6,7 @@ Escopo: `Sources/`, `Tests/`, `scripts/`, README e docs no commit `e1194ed`.
 
 ## Situação (2026-11-03, commit seguinte a `d5d4244`)
 
-Itens 1 a 8 e 10 a 12 corrigidos. A lógica foi para `HetzCore/AutoPilot.swift`, com testes em `AutoPilotTests.swift`. O item 9 foi corrigido em parte: o relógio só avança e um início no futuro conta como expirado. O PRO segue sem trava técnica, por ser código aberto. Sem `flock` entre app e `hetzctl`: o app recusa rodar em duas cópias, mas o CLI e o app ainda podem coincidir.
+Itens 1 a 8 e 10 a 12 corrigidos. A lógica foi para `HetzCore/AutoPilot.swift`, com testes em `AutoPilotTests.swift`. O item 9 foi corrigido em parte: o relógio só avança e um início no futuro conta como expirado. O PRO segue sem trava técnica, por ser código aberto. Item 7 completo na 0.3.0: toda transação I2C pega uma trava de arquivo (`flock`) compartilhada entre o app e o `hetzctl`. Item 12 deixou de existir: o `install.sh` foi substituído pelo DMG (`scripts/package.sh`).
 
 ## Achados originais
 

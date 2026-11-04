@@ -54,14 +54,14 @@ Legenda: ✅ pronto no AB-McHZ · 🟡 parcial · ⬜ falta.
 | Marca e ícone | ⬜ → feito nesta rodada | Logo AB em `assets/brand/`, `AppIcon.icns` no bundle | **P0** |
 | Licença | ✅ PolyForm Noncommercial 1.0.0 (`LICENSE.md`) | Uso pessoal e não comercial; uso comercial só com autorização | — |
 | README público | ✅ `README.md` | Manter a tabela Livre/PRO em dia | — |
-| Repositório público | ⬜ não é repositório git | `git init`, `.gitignore` (`.build/`), GitHub público. **Precisa do seu OK.** | **P0** |
-| Assinatura e notarização | 🟡 ad hoc | Developer ID (conta Apple Developer, US$ 99/ano) + `notarytool` | P1 |
-| Distribuição | 🟡 `scripts/install.sh` compila na máquina | DMG + cask Homebrew próprio (`tap`) | P1 |
-| Abrir no login | 🟡 LaunchAgent manual | `SMAppService.mainApp.register()` (macOS 13+) com chave na UI | P1 |
-| Atualização automática | ⬜ | Sparkle 2 (MIT) com appcast assinado no GitHub Releases | P1 |
-| Ajustes e primeiro uso | ⬜ | Janela de Ajustes; aviso de DDC/CI ligado no OSD do monitor | P1 |
+| Repositório público | ✅ github.com/oalexandrebelo/AB-McHZ | — | — |
+| Assinatura e notarização | 🟡 ad hoc; `package.sh` e `release.yml` já assinam e notarizam com os segredos de Developer ID | Falta só a conta Apple Developer (US$ 99/ano) | P1 |
+| Distribuição | ✅ DMG (arrastar para Aplicativos) em GitHub Releases, gerado por `scripts/package.sh` | Cask Homebrew num tap próprio | P2 |
+| Abrir no login | ✅ `SMAppService.mainApp`, ligado na primeira abertura, chave em Ajustes | — | — |
+| Atualização | 🟡 aviso diário de release nova no GitHub, com link para o DMG | Sparkle 2 (MIT) para instalar sozinho, depois do Developer ID | P2 |
+| Ajustes e primeiro uso | 🟡 janela de Ajustes (login, EDID, automação, licença, CLI, perfis, atualizações) | Aviso de DDC/CI ligado no OSD do monitor | P2 |
 | Idiomas | 🟡 só pt-BR | String Catalog (`.xcstrings`) pt-BR + en | P2 |
-| CI | ⬜ | GitHub Actions `macos-15`: `swift build` + `swift test` | P1 |
+| CI | ✅ `ci.yml` (build, testes, pacote) e `release.yml` (tag → DMG na release) | — | — |
 | Coleta de erros | ⬜ | Exportar log local (`OSLog`); sem telemetria por padrão | P2 |
 
 ## 3. Ordem sugerida

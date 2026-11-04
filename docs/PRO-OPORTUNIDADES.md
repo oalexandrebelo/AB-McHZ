@@ -65,7 +65,7 @@ Mesas consideradas:
 ## 4. Produto (distribuição)
 
 - **Atualização:** Sparkle 2 (MIT) com appcast no GitHub Releases, assinatura EdDSA.
-- **Abrir no login:** `SMAppService.mainApp` (nativo), no lugar do LaunchAgent do `install.sh`.
+- **Abrir no login:** feito na 0.3.0 com `SMAppService.mainApp`.
 - **Créditos:** `THIRD_PARTY_NOTICES.md` com o aviso de cada fonte MIT/Apache usada.
 - **Assinatura:** Developer ID e notarização (conta Apple Developer) para rodar sem o aviso do Gatekeeper em outros Macs.
 
@@ -76,6 +76,8 @@ Feitos em 2026-11-03:
 - **2.** agenda (BenQ `noite`, 20:00–07:00);
 - **6.** ULMB com taxa de 240 Hz fixada pelo preset;
 - **7.** atalhos ⌃⌥⌘1–9, pelo Carbon `RegisterEventHotKey`, sem dependência nova nem permissão de Acessibilidade.
+
+Feito na 0.3.0: licença PRO vitalícia vinculada ao Mac e ao usuário de login (hash de IOPlatformUUID + usuário), app empacotado em DMG com Ajustes.
 
 Próximos: 4 (proteção de layout), 3 (tela virtual a partir do BetterDummy MIT) e `THIRD_PARTY_NOTICES.md` quando o primeiro código de terceiros entrar.
 

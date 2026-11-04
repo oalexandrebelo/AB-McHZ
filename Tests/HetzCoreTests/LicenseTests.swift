@@ -63,6 +63,25 @@ import Testing
         #expect(try LicenseKey.parse(wrapped, publicKey: publicKey).owner == "dono")
     }
 
+    @Test func boundKeyOnlyWorksOnItsMacAndLogin() throws {
+        let mine = MachineBinding.make(platformUUID: "UUID-A", user: "alexandre")
+        let key = try LicenseKey.issue(owner: "dono", machine: mine, privateKey: signer)
+        #expect(try LicenseKey.parse(key, publicKey: publicKey, machine: mine).machine == mine)
+        let otherUser = MachineBinding.make(platformUUID: "UUID-A", user: "convidado")
+        let otherMac = MachineBinding.make(platformUUID: "UUID-B", user: "alexandre")
+        for machine in [otherUser, otherMac, nil] {
+            #expect(throws: LicenseError.otherMachine) { try LicenseKey.parse(key, publicKey: publicKey, machine: machine) }
+        }
+        #expect(Edition.resolve(key: key, trialStart: start, now: start + 100 * day, publicKey: publicKey, machine: mine)
+                == .pro(owner: "dono", boundToThisMac: true))
+        #expect(Edition.resolve(key: key, trialStart: start, now: start + 100 * day, publicKey: publicKey, machine: otherMac) == .free)
+        #expect(!mine.contains("UUID") && !mine.contains("alexandre"))
+    }
+
+    @Test func thisMacHasABinding() {
+        #expect(MachineBinding.current?.count == 22)
+    }
+
     @Test func rollingTheClockBackDoesNotRestoreTrialDays() {
         let lastSeen = start + 20 * day
         #expect(Edition.resolve(key: nil, trialStart: start, now: start + 1 * day, lastSeen: lastSeen, publicKey: publicKey) == .free)

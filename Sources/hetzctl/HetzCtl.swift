@@ -14,11 +14,15 @@ uso: hetzctl <comando>
   set <tela> <vcp> <valor> [--force]        grava um código VCP e confere a releitura (--force para entrada, energia, reset)
   modes <tela>                              modos que o macOS oferece para a tela
   mode <tela> LxA@Hz [--hidpi] [--force]    troca o modo com watchdog de 6 s
-  apply <perfil.json> <preset> [--display <tela>] [--dry-run] [--force]   (PRO)
+  profiles                                  perfis disponíveis (do app e do usuário) e seus presets
+  apply <perfil> <preset> [--display <tela>] [--dry-run] [--force]   (PRO) perfil por id ou arquivo .json
   optimize <tela> [--dry-run] [--preset]    (PRO) taxa máxima do perfil, perfil de cor e, com --preset, o DDC do preset padrão
   license                                   edição atual (livre, avaliação de 14 dias ou PRO)
   license activate <chave>                  ativa o AB-McHZ PRO com a chave de licença
-  license issue <dono>                      emite chave (precisa de ~/.config/ab-mchz/licenca-ed25519.key)
+  license machine                           vínculo deste Mac e deste usuário de login (para emitir uma chave para cá)
+  license issue <dono> [--machine <vínculo>|--any-mac]
+                                            emite chave vitalícia, vinculada a este Mac/usuário por padrão
+                                            (precisa de ~/.config/ab-mchz/licenca-ed25519.key)
 
 <tela>: ID numérico (veja list), "main" ou parte do nome (ex.: benq).
 <vcp>:  0x10 é hexadecimal; 16 é decimal.
@@ -36,9 +40,11 @@ struct HetzCtl {
         var positional: [String] = []
         var flags: Set<String> = []
         var display: String?
+        var machine: String?
         var args = CommandLine.arguments.dropFirst()
         while let arg = args.popFirst() {
             if arg == "--display" { display = args.popFirst() }
+            else if arg == "--machine" { machine = args.popFirst() }
             else if arg.hasPrefix("-") { flags.insert(arg) }
             else { positional.append(arg) }
         }
@@ -54,6 +60,7 @@ struct HetzCtl {
             let command = positional.removeFirst()
             let status: Int32 = switch (command, positional.count) {
             case ("list", 0): await cli.list()
+            case ("profiles", 0): cli.profiles()
             case ("edid", 1): try await cli.edid(positional[0])
             case ("edid-fix", 1): try await cli.edidFix(positional[0])
             case ("edid-clear", 1): try await cli.edidClear(positional[0])
@@ -65,7 +72,8 @@ struct HetzCtl {
             case ("optimize", 1): try await cli.optimize(positional[0])
             case ("license", 0): cli.license()
             case ("license", 2) where positional[0] == "activate": try cli.activate(positional[1])
-            case ("license", 2) where positional[0] == "issue": try cli.issue(owner: positional[1])
+            case ("license", 1) where positional[0] == "machine": try cli.machine()
+            case ("license", 2) where positional[0] == "issue": try cli.issue(owner: positional[1], machine: machine)
             default: throw UsageError("comando ou número de argumentos inválido: \(([command] + positional).joined(separator: " "))")
             }
             exit(status)
@@ -82,6 +90,16 @@ struct HetzCtl {
 struct CLI {
     let engine: DisplayEngine
     let flags: Set<String>
+
+    func profiles() -> Int32 {
+        let folders = Profile.searchDirectories
+        print("pastas (a seguinte substitui perfil de mesmo id): \(folders.map(\.path).joined(separator: " · "))")
+        for profile in Profile.loadAll(in: folders) {
+            let presets = profile.presets.keys.sorted().map { profile.presets[$0]!.isDefault ? "\($0)*" : $0 }
+            print("  \(profile.id.padding(toLength: 16, withPad: " ", startingAt: 0)) \(profile.monitor.model) · presets: \(presets.joined(separator: ", "))")
+        }
+        return 0
+    }
 
     func list() async -> Int32 {
         let displays = await engine.displays
@@ -221,9 +239,10 @@ struct CLI {
     func optimize(_ query: String) async throws -> Int32 {
         let display = try await engine.resolve(query)
         let edid = display.hasDDC ? try? await engine.edid(for: display.id) : nil
-        let folder = ProcessInfo.processInfo.environment["ABMCHZ_PROFILES"].map { URL(fileURLWithPath: $0) } ?? Profile.directory
-        guard let profile = Profile.loadAll(in: folder).first(where: { $0.matches(edid: edid, name: display.name) }) else {
-            throw UsageError("nenhum perfil em \(folder.path) corresponde à tela \(display.id) (\(display.name ?? "—"))")
+        let folders = Profile.searchDirectories
+        guard let profile = Profile.loadAll(in: folders).first(where: { $0.matches(edid: edid, name: display.name) }) else {
+            let paths = folders.map(\.path).joined(separator: ", ")
+            throw UsageError("nenhum perfil em \(paths) corresponde à tela \(display.id) (\(display.name ?? "—"))")
         }
         let dryRun = flags.contains("--dry-run")
         if !dryRun {
@@ -253,11 +272,17 @@ struct CLI {
 
     func activate(_ key: String) throws -> Int32 {
         let license = try Licensing.activate(key)
-        print("AB-McHZ PRO ativado para \(license.owner)")
+        print("AB-McHZ PRO vitalício ativado para \(license.owner)\(license.machine == nil ? "" : ", vinculado a este Mac e usuário")")
         return 0
     }
 
-    func issue(owner: String) throws -> Int32 {
+    func machine() throws -> Int32 {
+        guard let binding = MachineBinding.current else { throw UsageError("não foi possível ler o IOPlatformUUID deste Mac") }
+        print(binding)
+        return 0
+    }
+
+    func issue(owner: String, machine: String?) throws -> Int32 {
         let path = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".config/ab-mchz/licenca-ed25519.key")
         guard let text = try? String(contentsOf: path, encoding: .utf8),
               let raw = Data(base64Encoded: text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
@@ -267,12 +292,30 @@ struct CLI {
         guard signer.publicKey.rawRepresentation.base64EncodedString() == LicenseKey.embeddedPublicKey else {
             throw UsageError("a chave privada em \(path.path) não corresponde à chave pública embutida no AB-McHZ")
         }
-        print(try LicenseKey.issue(owner: owner, privateKey: signer))
+        let binding: String?
+        if flags.contains("--any-mac") {
+            binding = nil
+        } else if let machine {
+            binding = machine
+        } else {
+            guard let current = MachineBinding.current else { throw UsageError("não foi possível ler o IOPlatformUUID deste Mac") }
+            binding = current
+        }
+        print(try LicenseKey.issue(owner: owner, machine: binding, privateKey: signer))
         return 0
     }
 
     func apply(_ path: String, _ presetName: String, display query: String?) async throws -> Int32 {
-        let profile = try Profile.load(from: URL(fileURLWithPath: path))
+        let profile: Profile
+        if FileManager.default.fileExists(atPath: path) {
+            profile = try Profile.load(from: URL(fileURLWithPath: path))
+        } else {
+            let all = Profile.loadAll(in: Profile.searchDirectories)
+            guard let found = all.first(where: { $0.id == path }) else {
+                throw UsageError("perfil \"\(path)\" não existe; disponíveis: \(all.map(\.id).joined(separator: ", "))")
+            }
+            profile = found
+        }
         let plan = try profile.plan(for: presetName)
         let display = if let query { try await engine.resolve(query) } else { try await match(profile) }
 

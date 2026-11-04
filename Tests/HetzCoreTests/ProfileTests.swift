@@ -69,6 +69,19 @@ func profileURL(_ name: String) -> URL {
         #expect(ids == ["asus-pg259qn", "asus-xg259qn", "benq-xl2430t"])
     }
 
+    @Test func userFolderOverridesBundledProfileByID() throws {
+        let user = FileManager.default.temporaryDirectory.appendingPathComponent("ab-mchz-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: user, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: user) }
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: profileURL("benq-xl2430t"))) as! [String: Any]
+        json["monitor"] = (json["monitor"] as! [String: Any]).merging(["model": "BenQ editado"]) { $1 }
+        try JSONSerialization.data(withJSONObject: json).write(to: user.appendingPathComponent("minha-benq.json"))
+
+        let merged = Profile.loadAll(in: [repoRoot.appendingPathComponent("profiles"), user])
+        #expect(merged.map(\.id) == ["asus-pg259qn", "asus-xg259qn", "benq-xl2430t"])
+        #expect(merged.last?.monitor.model == "BenQ editado")
+    }
+
     @Test func pg259qnULMBOverridesRefreshWithoutFallback() throws {
         let profile = try Profile.load(from: profileURL("asus-pg259qn"))
         let plan = try profile.plan(for: "ulmb")

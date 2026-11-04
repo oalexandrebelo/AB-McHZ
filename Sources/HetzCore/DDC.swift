@@ -141,10 +141,17 @@ struct PrivateAPI: @unchecked Sendable {
 
 /// I2C é lento e bloqueante: tudo passa por esta fila serial, fora do pool cooperativo.
 private let i2cQueue = DispatchQueue(label: "ab-mchz.i2c")
+/// App e hetzctl são processos distintos: a trava de arquivo impede que intercalem pedido e resposta DDC no mesmo barramento.
+private let i2cLock = open(NSTemporaryDirectory() + "ab-mchz-i2c.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
 
 func onI2CQueue<T: Sendable>(_ work: @escaping @Sendable () throws(DDCError) -> T) async throws(DDCError) -> T {
     let result: Result<T, DDCError> = await withCheckedContinuation { continuation in
-        i2cQueue.async { continuation.resume(returning: Result(catching: work)) }
+        i2cQueue.async {
+            if i2cLock >= 0 { flock(i2cLock, LOCK_EX) }
+            let result = Result(catching: work)
+            if i2cLock >= 0 { flock(i2cLock, LOCK_UN) }
+            continuation.resume(returning: result)
+        }
     }
     return try result.get()
 }
